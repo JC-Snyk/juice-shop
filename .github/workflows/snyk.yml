@@ -1,0 +1,64 @@
+# Snyk — the documented GitHub Actions integration, nothing more.
+#
+# Every step below comes straight from Snyk's published examples:
+#   https://github.com/snyk/actions
+#   https://docs.snyk.io/developer-tools/integrations/snyk-ci-cd-integrations/github-actions-for-snyk-setup-and-checking-for-vulnerabilities
+#
+# How the gate works: the Snyk Actions wrap the Snyk CLI, and `snyk test` exits
+# non-zero when it finds issues at or above --severity-threshold. That exit code
+# fails the job. There is no wrapper script interpreting results — the product
+# decides pass/fail.
+#
+# Requires a SNYK_TOKEN repository secret. Without it the CLI returns
+# 401 Unauthorized and every job fails on authentication, not on findings.
+#
+# To stop a red job from being merged, enable branch protection on master and
+# mark these checks required. That is a GitHub setting, not pipeline code.
+name: Snyk
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  # Snyk Open Source. --all-projects picks up both manifests in this repo
+  # (./package.json and ./frontend/package.json).
+  #
+  # The install step is required, not incidental: this repo commits no
+  # package-lock.json, and Snyk documents that npm projects must be built first
+  # in that case — without a lockfile it reads node_modules to resolve the
+  # dependency tree. Install flags match the ones this repo's own CI uses.
+  #   https://docs.snyk.io/developer-tools/snyk-cli/snyk-cli/scan-and-maintain-projects-using-the-cli/snyk-cli-for-open-source/open-source-projects-that-must-be-built-before-testing-with-the-snyk-cli
+  open-source:
+    name: Snyk Open Source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          npm install --ignore-scripts
+          cd frontend
+          npm install --ignore-scripts --legacy-peer-deps
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --all-projects --severity-threshold=high
+
+  # Snyk Code. There is no snyk/actions/code, so the documented approach is the
+  # Setup action to install the CLI, then run `snyk code test` directly.
+  code:
+    name: Snyk Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: snyk/actions/setup@master
+      - name: Run Snyk Code to check for vulnerabilities
+        run: snyk code test --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
